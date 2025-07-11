@@ -1,9 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const helmet = require('helmet');
-const compression = require('compression');
-const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const path = require('path');
 
@@ -22,7 +19,30 @@ const {
   maintenanceMode
 } = require('./middleware/errorHandler');
 
-const { protect, optionalAuth, authRateLimit } = require('./middleware/auth');
+// Import security middleware
+const {
+  authRateLimit,
+  generalRateLimit,
+  uploadRateLimit,
+  passwordResetRateLimit,
+  helmetConfig,
+  requestSignature,
+  ipFilter,
+  requestId,
+  securityHeaders,
+  inputSanitization,
+  corsOptions,
+  requestLogger: securityRequestLogger,
+  apiVersioning,
+  compressionConfig,
+  requestSizeLimit,
+  deviceFingerprint,
+  maintenanceMode: securityMaintenanceMode
+} = require('./middleware/security');
+
+const { serveStaticFiles, dualUploadMiddleware } = require('./middleware/upload');
+
+const { protect, optionalAuth } = require('./middleware/auth');
 const {
   validateUserRegistration,
   validateUserLogin,
@@ -64,32 +84,25 @@ if (!fs.existsSync('logs')) {
   fs.mkdirSync('logs');
 }
 
-// Security middleware
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-    },
-  },
-}));
-
-// CORS configuration
-app.use(cors({
-  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-csrf-token']
-}));
-
-// Compression middleware
-app.use(compression());
+// Advanced Security Middleware
+app.use(requestId); // Add unique request ID
+app.use(ipFilter); // IP filtering and blacklist
+app.use(deviceFingerprint); // Device fingerprinting
+app.use(helmetConfig); // Advanced Helmet configuration
+app.use(securityHeaders); // Additional security headers
+app.use(cors(corsOptions)); // Advanced CORS configuration
+app.use(compressionConfig); // Smart compression
+app.use(requestSizeLimit); // Request size limiting
+app.use(...inputSanitization); // XSS and NoSQL injection protection
+app.use(apiVersioning); // API versioning support
+app.use(requestSignature); // Request signature verification
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Serve static files
+serveStaticFiles(app);
 
 // Request logging
 if (process.env.NODE_ENV === 'development') {
@@ -98,25 +111,13 @@ if (process.env.NODE_ENV === 'development') {
 app.use(requestLogger);
 
 // Maintenance mode
-app.use(maintenanceMode);
+app.use(securityMaintenanceMode);
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-  message: rateLimitHandler,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
+// Global rate limiting
+app.use(generalRateLimit);
 
-// Strict rate limiting for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
-  message: rateLimitHandler,
-  skipSuccessfulRequests: true,
-});
+// Security request logging
+app.use(securityRequestLogger);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -132,14 +133,14 @@ app.get('/health', (req, res) => {
 // API Routes
 
 // 🔐 Authentication & User Management Routes
-app.post('/auth/register', authLimiter, validateUserRegistration, authController.register);
-app.post('/auth/login', authLimiter, validateUserLogin, authController.login);
+app.post('/auth/register', authRateLimit, validateUserRegistration, authController.register);
+app.post('/auth/login', authRateLimit, validateUserLogin, authController.login);
 app.post('/auth/logout', protect, authController.logout);
-app.post('/auth/refresh-token', authController.refreshToken);
-app.post('/auth/forgot-password', authLimiter, authController.forgotPassword);
-app.post('/auth/reset-password/:token', validatePasswordChange, authController.resetPassword);
-app.post('/auth/verify-otp', authController.verifyOTP);
-app.post('/auth/change-password', protect, validatePasswordChange, authController.changePassword);
+app.post('/auth/refresh-token', authRateLimit, authController.refreshToken);
+app.post('/auth/forgot-password', passwordResetRateLimit, authController.forgotPassword);
+app.post('/auth/reset-password/:token', passwordResetRateLimit, validatePasswordChange, authController.resetPassword);
+app.post('/auth/verify-otp', authRateLimit, authController.verifyOTP);
+app.post('/auth/change-password', protect, authRateLimit, validatePasswordChange, authController.changePassword);
 
 // 👤 User Profile Management Routes
 app.get('/user/profile', protect, (req, res) => {
@@ -154,8 +155,48 @@ app.put('/user/profile', protect, validateProfileUpdate, (req, res) => {
   res.json({ success: true, message: 'Profile update endpoint - Implementation pending' });
 });
 
-app.post('/user/upload-avatar', protect, (req, res) => {
-  res.json({ success: true, message: 'Avatar upload endpoint - Implementation pending' });
+app.post('/user/upload-avatar', protect, uploadRateLimit, dualUploadMiddleware('avatar'), (req, res) => {
+  if (!req.file && !req.uploadResults) {
+    return res.status(400).json({
+      success: false,
+      message: 'No file uploaded'
+    });
+  }
+
+  let fileInfo = {};
+  
+  if (req.uploadResults) {
+    // Dual upload
+    fileInfo = req.uploadResults;
+  } else if (req.file) {
+    // Single upload
+    if (process.env.UPLOAD_STRATEGY === 'cloudinary') {
+      fileInfo.cloudinary = {
+        public_id: req.file.filename,
+        url: req.file.path
+      };
+    } else {
+      fileInfo.local = {
+        filename: req.file.filename,
+        path: req.file.path,
+        url: `${req.protocol}://${req.get('host')}/assets/profileimage/${req.file.filename}`
+      };
+    }
+  }
+
+  res.json({
+    success: true,
+    message: 'Avatar uploaded successfully',
+    data: {
+      fileInfo,
+      uploadStrategy: process.env.UPLOAD_STRATEGY || 'local',
+      availableUrls: {
+        local: fileInfo.local?.url,
+        cloudinary: fileInfo.cloudinary?.url
+      },
+      primaryUrl: fileInfo.cloudinary?.url || fileInfo.local?.url
+    }
+  });
 });
 
 app.get('/user/stats', protect, (req, res) => {
