@@ -182,6 +182,68 @@ MAINTENANCE_MODE=false
 # Deployment logs check করুন
 ```
 
+## ⚙️ Step 3.6: Koyeb Builder Configuration & Port Setup
+
+Koyeb এ deploy করার সময় নিচের configuration follow করুন:
+
+- **Builder:** Buildpack (default)
+- **Build command:** (ফাঁকা রাখুন, unless custom build দরকার)
+- **Run command:** (ফাঁকা রাখুন, unless custom run দরকার)
+- **Work directory:** (ফাঁকা রাখুন, যদি root এ code থাকে)
+- **Exposed port:**
+  - Environment variable এ `PORT=8000` দিন
+  - App টি অবশ্যই port 8000-এ listen করতে হবে
+- **Health check:**
+  - `/health` endpoint ensure করুন (এই project-এ আছে)
+  - Koyeb TCP health check port 8000-এ হবে
+
+#### Example Environment Variables
+```env
+PORT=8000
+MONGO_URI=your_mongodb_uri
+MONGO_DB_NAME=your_db_name
+NODE_ENV=production
+```
+
+#### Example package.json scripts
+```json
+"scripts": {
+  "start": "node app.js"
+}
+```
+
+---
+
+## 🛠️ Step 5: Troubleshooting Common Koyeb Errors
+
+- **error: UNCAUGHT EXCEPTION! 💥 Shutting down...**
+- **error: ReferenceError**
+- **Application exited with code 1**
+
+**সম্ভাব্য কারণ ও সমাধান:**
+
+1. **Environment variable ঠিকমতো set হয়নি:**
+   - Koyeb dashboard এ সব env variable ঠিকমতো add হয়েছে কিনা check করুন (বিশেষ করে MONGO_URI, PORT, JWT_SECRET ইত্যাদি)।
+2. **PORT mismatch:**
+   - App টি অবশ্যই process.env.PORT (মানে 8000) এ listen করতে হবে।
+   - Example:
+     ```js
+     const PORT = process.env.PORT || 8000;
+     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+     ```
+3. **Database connection error:**
+   - MONGO_URI, MONGO_DB_NAME ঠিক আছে কিনা check করুন।
+   - User/pass, DB name, network access ঠিক আছে কিনা দেখুন।
+4. **Code এ ReferenceError:**
+   - Deployment log এ error details দেখুন।
+   - কোন variable undefined, সেটা fix করুন।
+5. **Start command ভুল:**
+   - package.json এ "start": "node app.js" আছে কিনা দেখুন।
+
+---
+
+**Deploy error হলে Koyeb log details দেখে error message Google করুন বা এখানে paste করুন।**
+
 ## 🔧 Step 4: Post-Deployment Configuration
 
 ### 4.1 Custom Domain Setup (Optional)
