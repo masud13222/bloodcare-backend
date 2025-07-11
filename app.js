@@ -1,123 +1,480 @@
 require('dotenv').config();
 const express = require('express');
-const mongoose = require('mongoose');
+const cors = require('cors');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+const morgan = require('morgan');
+const path = require('path');
+
+// Import database connection
+const connectDB = require('./config/database');
+
+// Import middleware
+const {
+  globalErrorHandler,
+  handleNotFound,
+  handleUncaughtException,
+  handleUnhandledRejection,
+  handleSIGTERM,
+  requestLogger,
+  rateLimitHandler,
+  maintenanceMode
+} = require('./middleware/errorHandler');
+
+const { protect, optionalAuth, authRateLimit } = require('./middleware/auth');
+const {
+  validateUserRegistration,
+  validateUserLogin,
+  validateBloodRequest,
+  validateDonationRecord,
+  validateMessage,
+  validateProfileUpdate,
+  validatePasswordChange,
+  validateMongoId,
+  validatePagination,
+  validateSearchQuery
+} = require('./middleware/validation');
+
+// Import controllers
+const authController = require('./controllers/authController');
+
+// Import models (to ensure they're registered)
+require('./models/User');
+require('./models/BloodRequest');
+require('./models/Donation');
+require('./models/Notification');
+require('./models/Message');
+require('./models/Achievement');
+
+// Handle uncaught exceptions
+handleUncaughtException();
+
+// Connect to database
+connectDB();
+
 const app = express();
 
-app.use(express.json());
+// Trust proxy (for rate limiting behind reverse proxy)
+app.set('trust proxy', 1);
 
-// MongoDB connection
-mongoose.connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-.then(() => console.log('MongoDB Connected'))
-.catch((err) => console.error('MongoDB Connection Error:', err));
+// Create logs directory
+const fs = require('fs');
+if (!fs.existsSync('logs')) {
+  fs.mkdirSync('logs');
+}
 
-// Authentication & User Management
-app.post('/auth/register', (req, res) => res.json({ message: 'User registration endpoint' }));
-app.post('/auth/login', (req, res) => res.json({ message: 'User login endpoint' }));
-app.post('/auth/logout', (req, res) => res.json({ message: 'Logout endpoint' }));
-app.post('/auth/refresh-token', (req, res) => res.json({ message: 'Refresh token endpoint' }));
-app.post('/auth/forgot-password', (req, res) => res.json({ message: 'Forgot password endpoint' }));
-app.post('/auth/reset-password', (req, res) => res.json({ message: 'Reset password endpoint' }));
-app.post('/auth/verify-otp', (req, res) => res.json({ message: 'Verify OTP endpoint' }));
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+}));
 
-// User Profile Management
-app.get('/user/profile', (req, res) => res.json({ message: 'Get user profile' }));
-app.put('/user/profile', (req, res) => res.json({ message: 'Update user profile' }));
-app.post('/user/upload-avatar', (req, res) => res.json({ message: 'Upload profile avatar' }));
-app.get('/user/stats', (req, res) => res.json({ message: 'Get user stats' }));
-app.put('/user/availability', (req, res) => res.json({ message: 'Toggle availability' }));
-app.get('/user/achievements', (req, res) => res.json({ message: 'User achievements' }));
-app.put('/user/settings', (req, res) => res.json({ message: 'Update user settings' }));
-app.delete('/user/account', (req, res) => res.json({ message: 'Delete user account' }));
+// CORS configuration
+app.use(cors({
+  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-csrf-token']
+}));
 
-// Blood Request Management
-app.post('/requests/create', (req, res) => res.json({ message: 'Create blood request' }));
-app.get('/requests', (req, res) => res.json({ message: 'Get all blood requests' }));
-app.get('/requests/:id', (req, res) => res.json({ message: 'Get blood request by ID' }));
-app.put('/requests/:id', (req, res) => res.json({ message: 'Update blood request' }));
-app.delete('/requests/:id', (req, res) => res.json({ message: 'Delete blood request' }));
-app.get('/requests/emergency', (req, res) => res.json({ message: 'Get emergency requests' }));
-app.post('/requests/:id/respond', (req, res) => res.json({ message: 'Respond to blood request' }));
-app.get('/requests/my-requests', (req, res) => res.json({ message: 'Get my requests' }));
-app.get('/requests/nearby', (req, res) => res.json({ message: 'Get nearby requests' }));
+// Compression middleware
+app.use(compression());
 
-// Donor Search & Matching
-app.get('/donors/search', (req, res) => res.json({ message: 'Search donors' }));
-app.get('/donors/:id', (req, res) => res.json({ message: 'Get donor profile' }));
-app.get('/donors/compatible', (req, res) => res.json({ message: 'Get compatible donors' }));
-app.post('/donors/contact', (req, res) => res.json({ message: 'Contact donor' }));
-app.get('/donors/favorites', (req, res) => res.json({ message: 'Get favorite donors' }));
-app.post('/donors/add-favorite', (req, res) => res.json({ message: 'Add favorite donor' }));
-app.delete('/donors/remove-favorite', (req, res) => res.json({ message: 'Remove favorite donor' }));
-app.get('/donors/nearby', (req, res) => res.json({ message: 'Get nearby donors' }));
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Dashboard & Statistics
-app.get('/dashboard/stats', (req, res) => res.json({ message: 'Dashboard stats' }));
-app.get('/dashboard/recent-requests', (req, res) => res.json({ message: 'Recent requests' }));
-app.get('/dashboard/emergency-banner', (req, res) => res.json({ message: 'Emergency banner info' }));
-app.get('/analytics/donation-trends', (req, res) => res.json({ message: 'Donation trends data' }));
-app.get('/analytics/regional-stats', (req, res) => res.json({ message: 'Regional stats' }));
+// Request logging
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+}
+app.use(requestLogger);
 
-// Donation History
-app.get('/donations/history', (req, res) => res.json({ message: 'Donation history' }));
-app.post('/donations/record', (req, res) => res.json({ message: 'Record new donation' }));
-app.get('/donations/summary', (req, res) => res.json({ message: 'Donation summary' }));
-app.get('/donations/next-eligible', (req, res) => res.json({ message: 'Next eligible donation date' }));
-app.post('/donations/export', (req, res) => res.json({ message: 'Export donation history PDF' }));
-app.put('/donations/:id/feedback', (req, res) => res.json({ message: 'Donation feedback' }));
+// Maintenance mode
+app.use(maintenanceMode);
 
-// Notifications
-app.get('/notifications', (req, res) => res.json({ message: 'Get notifications' }));
-app.post('/notifications/mark-read', (req, res) => res.json({ message: 'Mark notification as read' }));
-app.delete('/notifications/:id', (req, res) => res.json({ message: 'Delete notification' }));
-app.post('/notifications/bulk-action', (req, res) => res.json({ message: 'Bulk notification action' }));
-app.get('/notifications/unread-count', (req, res) => res.json({ message: 'Unread notification count' }));
-app.post('/notifications/subscribe', (req, res) => res.json({ message: 'Subscribe push notification' }));
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  message: rateLimitHandler,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(limiter);
 
-// Location & Geography
-app.get('/locations/districts', (req, res) => res.json({ message: 'Get districts list' }));
-app.get('/locations/hospitals', (req, res) => res.json({ message: 'Get hospitals list' }));
-app.get('/locations/nearby', (req, res) => res.json({ message: 'Get nearby locations' }));
-app.post('/locations/geocode', (req, res) => res.json({ message: 'Geocode address' }));
+// Strict rate limiting for auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // limit each IP to 5 requests per windowMs
+  message: rateLimitHandler,
+  skipSuccessfulRequests: true,
+});
 
-// Communication
-app.post('/messages/send', (req, res) => res.json({ message: 'Send message to donor' }));
-app.get('/messages/conversations', (req, res) => res.json({ message: 'Get conversations list' }));
-app.get('/messages/:conversationId', (req, res) => res.json({ message: 'Get conversation by ID' }));
-app.post('/calls/initiate', (req, res) => res.json({ message: 'Initiate call log' }));
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    success: true,
+    message: 'BloodCare API is running!',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV,
+    version: process.env.npm_package_version || '1.0.0'
+  });
+});
 
-// Achievements & Rewards
-app.get('/achievements', (req, res) => res.json({ message: 'Get achievements system' }));
-app.post('/achievements/unlock', (req, res) => res.json({ message: 'Unlock achievement' }));
-app.get('/leaderboard', (req, res) => res.json({ message: 'Leaderboard' }));
+// API Routes
 
-// System & Configuration
-app.get('/config/app-settings', (req, res) => res.json({ message: 'App configuration' }));
-app.get('/config/blood-types', (req, res) => res.json({ message: 'Blood types list' }));
-app.get('/config/urgency-levels', (req, res) => res.json({ message: 'Urgency levels' }));
-app.post('/feedback', (req, res) => res.json({ message: 'Send feedback' }));
-app.get('/terms-and-conditions', (req, res) => res.json({ message: 'Terms and conditions' }));
+// 🔐 Authentication & User Management Routes
+app.post('/auth/register', authLimiter, validateUserRegistration, authController.register);
+app.post('/auth/login', authLimiter, validateUserLogin, authController.login);
+app.post('/auth/logout', protect, authController.logout);
+app.post('/auth/refresh-token', authController.refreshToken);
+app.post('/auth/forgot-password', authLimiter, authController.forgotPassword);
+app.post('/auth/reset-password/:token', validatePasswordChange, authController.resetPassword);
+app.post('/auth/verify-otp', authController.verifyOTP);
+app.post('/auth/change-password', protect, validatePasswordChange, authController.changePassword);
 
-// Admin Panel (future)
-app.get('/admin/users', (req, res) => res.json({ message: 'Get all users (admin)' }));
-app.get('/admin/requests', (req, res) => res.json({ message: 'Admin requests management' }));
-app.put('/admin/users/:id/status', (req, res) => res.json({ message: 'Update user status (admin)' }));
-app.get('/admin/analytics', (req, res) => res.json({ message: 'Admin analytics' }));
+// 👤 User Profile Management Routes
+app.get('/user/profile', protect, (req, res) => {
+  res.json({
+    success: true,
+    message: 'User profile retrieved successfully',
+    data: req.user
+  });
+});
 
-// Real-time Features (WebSocket endpoints to be implemented separately)
-app.get('/ws/live-requests', (req, res) => res.json({ message: 'Live requests WebSocket endpoint (stub)' }));
-app.get('/ws/notifications', (req, res) => res.json({ message: 'Notifications WebSocket endpoint (stub)' }));
+app.put('/user/profile', protect, validateProfileUpdate, (req, res) => {
+  res.json({ success: true, message: 'Profile update endpoint - Implementation pending' });
+});
 
-// Mobile Specific
-app.post('/device/register', (req, res) => res.json({ message: 'Register device token' }));
-app.put('/device/update-location', (req, res) => res.json({ message: 'Update device location' }));
+app.post('/user/upload-avatar', protect, (req, res) => {
+  res.json({ success: true, message: 'Avatar upload endpoint - Implementation pending' });
+});
+
+app.get('/user/stats', protect, (req, res) => {
+  res.json({ success: true, message: 'User stats endpoint - Implementation pending' });
+});
+
+app.put('/user/availability', protect, (req, res) => {
+  res.json({ success: true, message: 'Availability toggle endpoint - Implementation pending' });
+});
+
+app.get('/user/achievements', protect, (req, res) => {
+  res.json({ success: true, message: 'User achievements endpoint - Implementation pending' });
+});
+
+app.put('/user/settings', protect, (req, res) => {
+  res.json({ success: true, message: 'User settings endpoint - Implementation pending' });
+});
+
+app.delete('/user/account', protect, (req, res) => {
+  res.json({ success: true, message: 'Account deletion endpoint - Implementation pending' });
+});
+
+// 🩸 Blood Request Management Routes
+app.post('/requests/create', protect, validateBloodRequest, (req, res) => {
+  res.json({ success: true, message: 'Create blood request endpoint - Implementation pending' });
+});
+
+app.get('/requests', optionalAuth, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Get blood requests endpoint - Implementation pending' });
+});
+
+app.get('/requests/emergency', optionalAuth, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Emergency requests endpoint - Implementation pending' });
+});
+
+app.get('/requests/my-requests', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'My requests endpoint - Implementation pending' });
+});
+
+app.get('/requests/nearby', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Nearby requests endpoint - Implementation pending' });
+});
+
+app.get('/requests/:id', optionalAuth, validateMongoId('id'), (req, res) => {
+  res.json({ success: true, message: 'Get blood request by ID endpoint - Implementation pending' });
+});
+
+app.put('/requests/:id', protect, validateMongoId('id'), (req, res) => {
+  res.json({ success: true, message: 'Update blood request endpoint - Implementation pending' });
+});
+
+app.delete('/requests/:id', protect, validateMongoId('id'), (req, res) => {
+  res.json({ success: true, message: 'Delete blood request endpoint - Implementation pending' });
+});
+
+app.post('/requests/:id/respond', protect, validateMongoId('id'), (req, res) => {
+  res.json({ success: true, message: 'Respond to blood request endpoint - Implementation pending' });
+});
+
+// 🔍 Donor Search & Matching Routes
+app.get('/donors/search', optionalAuth, validateSearchQuery, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Search donors endpoint - Implementation pending' });
+});
+
+app.get('/donors/compatible', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Compatible donors endpoint - Implementation pending' });
+});
+
+app.get('/donors/nearby', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Nearby donors endpoint - Implementation pending' });
+});
+
+app.get('/donors/favorites', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Favorite donors endpoint - Implementation pending' });
+});
+
+app.post('/donors/add-favorite', protect, (req, res) => {
+  res.json({ success: true, message: 'Add favorite donor endpoint - Implementation pending' });
+});
+
+app.delete('/donors/remove-favorite', protect, (req, res) => {
+  res.json({ success: true, message: 'Remove favorite donor endpoint - Implementation pending' });
+});
+
+app.get('/donors/:id', optionalAuth, validateMongoId('id'), (req, res) => {
+  res.json({ success: true, message: 'Get donor profile endpoint - Implementation pending' });
+});
+
+app.post('/donors/contact', protect, (req, res) => {
+  res.json({ success: true, message: 'Contact donor endpoint - Implementation pending' });
+});
+
+// 📊 Dashboard & Statistics Routes
+app.get('/dashboard/stats', optionalAuth, (req, res) => {
+  res.json({ success: true, message: 'Dashboard statistics endpoint - Implementation pending' });
+});
+
+app.get('/dashboard/recent-requests', optionalAuth, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Recent requests endpoint - Implementation pending' });
+});
+
+app.get('/dashboard/emergency-banner', optionalAuth, (req, res) => {
+  res.json({ success: true, message: 'Emergency banner endpoint - Implementation pending' });
+});
+
+app.get('/analytics/donation-trends', optionalAuth, (req, res) => {
+  res.json({ success: true, message: 'Donation trends endpoint - Implementation pending' });
+});
+
+app.get('/analytics/regional-stats', optionalAuth, (req, res) => {
+  res.json({ success: true, message: 'Regional statistics endpoint - Implementation pending' });
+});
+
+// 🩸 Donation History Routes
+app.get('/donations/history', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Donation history endpoint - Implementation pending' });
+});
+
+app.post('/donations/record', protect, validateDonationRecord, (req, res) => {
+  res.json({ success: true, message: 'Record donation endpoint - Implementation pending' });
+});
+
+app.get('/donations/summary', protect, (req, res) => {
+  res.json({ success: true, message: 'Donation summary endpoint - Implementation pending' });
+});
+
+app.get('/donations/next-eligible', protect, (req, res) => {
+  res.json({ success: true, message: 'Next eligible donation date endpoint - Implementation pending' });
+});
+
+app.post('/donations/export', protect, (req, res) => {
+  res.json({ success: true, message: 'Export donation history endpoint - Implementation pending' });
+});
+
+app.put('/donations/:id/feedback', protect, validateMongoId('id'), (req, res) => {
+  res.json({ success: true, message: 'Donation feedback endpoint - Implementation pending' });
+});
+
+// 🔔 Notifications Routes
+app.get('/notifications', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Get notifications endpoint - Implementation pending' });
+});
+
+app.post('/notifications/mark-read', protect, (req, res) => {
+  res.json({ success: true, message: 'Mark notification as read endpoint - Implementation pending' });
+});
+
+app.delete('/notifications/:id', protect, validateMongoId('id'), (req, res) => {
+  res.json({ success: true, message: 'Delete notification endpoint - Implementation pending' });
+});
+
+app.post('/notifications/bulk-action', protect, (req, res) => {
+  res.json({ success: true, message: 'Bulk notification action endpoint - Implementation pending' });
+});
+
+app.get('/notifications/unread-count', protect, (req, res) => {
+  res.json({ success: true, message: 'Unread notification count endpoint - Implementation pending' });
+});
+
+app.post('/notifications/subscribe', protect, (req, res) => {
+  res.json({ success: true, message: 'Subscribe push notification endpoint - Implementation pending' });
+});
+
+// 📍 Location & Geography Routes
+app.get('/locations/districts', (req, res) => {
+  // Static data for Bangladesh districts
+  const districts = [
+    'Dhaka', 'Chittagong', 'Rajshahi', 'Khulna', 'Barisal', 'Sylhet', 'Rangpur', 'Mymensingh',
+    'Comilla', 'Feni', 'Brahmanbaria', 'Rangamati', 'Noakhali', 'Chandpur', 'Lakshmipur',
+    'Cox\'s Bazar', 'Bandarban', 'Patuakhali', 'Pirojpur', 'Jhalokati', 'Barguna', 'Bhola'
+  ];
+  res.json({ success: true, message: 'Districts retrieved successfully', data: districts });
+});
+
+app.get('/locations/hospitals', validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Hospitals list endpoint - Implementation pending' });
+});
+
+app.get('/locations/nearby', protect, (req, res) => {
+  res.json({ success: true, message: 'Nearby locations endpoint - Implementation pending' });
+});
+
+app.post('/locations/geocode', (req, res) => {
+  res.json({ success: true, message: 'Geocode address endpoint - Implementation pending' });
+});
+
+// 💬 Communication Routes
+app.post('/messages/send', protect, validateMessage, (req, res) => {
+  res.json({ success: true, message: 'Send message endpoint - Implementation pending' });
+});
+
+app.get('/messages/conversations', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Get conversations endpoint - Implementation pending' });
+});
+
+app.get('/messages/:conversationId', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Get conversation messages endpoint - Implementation pending' });
+});
+
+app.post('/calls/initiate', protect, (req, res) => {
+  res.json({ success: true, message: 'Initiate call log endpoint - Implementation pending' });
+});
+
+// 🏆 Achievements & Rewards Routes
+app.get('/achievements', protect, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Achievements system endpoint - Implementation pending' });
+});
+
+app.post('/achievements/unlock', protect, (req, res) => {
+  res.json({ success: true, message: 'Unlock achievement endpoint - Implementation pending' });
+});
+
+app.get('/leaderboard', optionalAuth, validatePagination, (req, res) => {
+  res.json({ success: true, message: 'Leaderboard endpoint - Implementation pending' });
+});
+
+// ⚙️ System & Configuration Routes
+app.get('/config/app-settings', (req, res) => {
+  const settings = {
+    bloodTypes: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
+    urgencyLevels: ['low', 'medium', 'high', 'critical'],
+    donationTypes: ['whole_blood', 'plasma', 'platelets', 'double_red_cells'],
+    maxUnitsPerRequest: 10,
+    minDonationAge: 18,
+    maxDonationAge: 65,
+    minWeight: 45
+  };
+  res.json({ success: true, message: 'App settings retrieved successfully', data: settings });
+});
+
+app.get('/config/blood-types', (req, res) => {
+  const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+  res.json({ success: true, message: 'Blood types retrieved successfully', data: bloodTypes });
+});
+
+app.get('/config/urgency-levels', (req, res) => {
+  const urgencyLevels = [
+    { value: 'low', label: 'Low', color: '#28a745' },
+    { value: 'medium', label: 'Medium', color: '#ffc107' },
+    { value: 'high', label: 'High', color: '#fd7e14' },
+    { value: 'critical', label: 'Critical', color: '#dc3545' }
+  ];
+  res.json({ success: true, message: 'Urgency levels retrieved successfully', data: urgencyLevels });
+});
+
+app.post('/feedback', (req, res) => {
+  res.json({ success: true, message: 'Feedback endpoint - Implementation pending' });
+});
+
+app.get('/terms-and-conditions', (req, res) => {
+  res.json({ success: true, message: 'Terms and conditions endpoint - Implementation pending' });
+});
+
+// 📱 Mobile Specific Routes
+app.post('/device/register', protect, (req, res) => {
+  res.json({ success: true, message: 'Device registration endpoint - Implementation pending' });
+});
+
+app.put('/device/update-location', protect, (req, res) => {
+  res.json({ success: true, message: 'Update device location endpoint - Implementation pending' });
+});
+
+// 📊 Admin Panel Routes (Future)
+app.get('/admin/users', protect, (req, res) => {
+  res.json({ success: true, message: 'Admin users endpoint - Implementation pending' });
+});
+
+app.get('/admin/requests', protect, (req, res) => {
+  res.json({ success: true, message: 'Admin requests endpoint - Implementation pending' });
+});
+
+app.put('/admin/users/:id/status', protect, validateMongoId('id'), (req, res) => {
+  res.json({ success: true, message: 'Update user status endpoint - Implementation pending' });
+});
+
+app.get('/admin/analytics', protect, (req, res) => {
+  res.json({ success: true, message: 'Admin analytics endpoint - Implementation pending' });
+});
 
 // Default route
-app.get('/', (req, res) => res.send('BloodCare API is running!'));
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Welcome to BloodCare API',
+    version: '1.0.0',
+    documentation: '/api/docs',
+    endpoints: {
+      auth: '/auth/*',
+      users: '/user/*',
+      requests: '/requests/*',
+      donors: '/donors/*',
+      dashboard: '/dashboard/*',
+      donations: '/donations/*',
+      notifications: '/notifications/*',
+      locations: '/locations/*',
+      messages: '/messages/*',
+      achievements: '/achievements/*',
+      config: '/config/*'
+    }
+  });
+});
+
+// Handle unhandled routes
+app.all('*', handleNotFound);
+
+// Global error handling middleware
+app.use(globalErrorHandler);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log(`🚀 BloodCare API Server running on port ${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
+  console.log(`📊 Health check: http://localhost:${PORT}/health`);
 });
+
+// Handle unhandled promise rejections
+handleUnhandledRejection(server);
+
+// Handle SIGTERM
+handleSIGTERM(server);
+
+module.exports = app;
