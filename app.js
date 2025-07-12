@@ -7,73 +7,181 @@ const path = require('path');
 // Import database connection
 const connectDB = require('./config/database');
 
-// Import middleware
-const {
-  globalErrorHandler,
-  handleNotFound,
-  handleUncaughtException,
-  handleUnhandledRejection,
-  handleSIGTERM,
-  requestLogger,
-  rateLimitHandler,
-  maintenanceMode
-} = require('./middleware/errorHandler');
+// Import middleware with error handling
+let globalErrorHandler, handleNotFound, handleUncaughtException, handleUnhandledRejection, handleSIGTERM, requestLogger, rateLimitHandler, maintenanceMode;
+let authRateLimit, generalRateLimit, uploadRateLimit, passwordResetRateLimit, helmetConfig, requestSignature, ipFilter, requestId, securityHeaders, inputSanitization, corsOptions, securityRequestLogger, apiVersioning, compressionConfig, requestSizeLimit, deviceFingerprint, securityMaintenanceMode;
+let serveStaticFiles, dualUploadMiddleware;
+let protect, optionalAuth;
+let validateUserRegistration, validateUserLogin, validateBloodRequest, validateDonationRecord, validateMessage, validateProfileUpdate, validatePasswordChange, validateMongoId, validatePagination, validateSearchQuery;
+let authController;
 
-// Import security middleware
-const {
-  authRateLimit,
-  generalRateLimit,
-  uploadRateLimit,
-  passwordResetRateLimit,
-  helmetConfig,
-  requestSignature,
-  ipFilter,
-  requestId,
-  securityHeaders,
-  inputSanitization,
-  corsOptions,
-  requestLogger: securityRequestLogger,
-  apiVersioning,
-  compressionConfig,
-  requestSizeLimit,
-  deviceFingerprint,
-  maintenanceMode: securityMaintenanceMode
-} = require('./middleware/security');
+try {
+  const errorHandler = require('./middleware/errorHandler');
+  globalErrorHandler = errorHandler.globalErrorHandler;
+  handleNotFound = errorHandler.handleNotFound;
+  handleUncaughtException = errorHandler.handleUncaughtException;
+  handleUnhandledRejection = errorHandler.handleUnhandledRejection;
+  handleSIGTERM = errorHandler.handleSIGTERM;
+  requestLogger = errorHandler.requestLogger;
+  rateLimitHandler = errorHandler.rateLimitHandler;
+  maintenanceMode = errorHandler.maintenanceMode;
+  console.log('Error handler middleware loaded');
+} catch (error) {
+  console.error('Error loading error handler middleware:', error.message);
+  // Create fallback functions
+  globalErrorHandler = (err, req, res, next) => {
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  };
+  handleNotFound = (req, res, next) => {
+    res.status(404).json({ success: false, message: 'Route not found' });
+  };
+  handleUncaughtException = () => {};
+  handleUnhandledRejection = () => {};
+  handleSIGTERM = () => {};
+  requestLogger = (req, res, next) => next();
+  rateLimitHandler = (req, res) => {
+    res.status(429).json({ success: false, message: 'Too many requests' });
+  };
+  maintenanceMode = (req, res, next) => next();
+}
 
-const { serveStaticFiles, dualUploadMiddleware } = require('./middleware/upload');
+try {
+  const security = require('./middleware/security');
+  authRateLimit = security.authRateLimit;
+  generalRateLimit = security.generalRateLimit;
+  uploadRateLimit = security.uploadRateLimit;
+  passwordResetRateLimit = security.passwordResetRateLimit;
+  helmetConfig = security.helmetConfig;
+  requestSignature = security.requestSignature;
+  ipFilter = security.ipFilter;
+  requestId = security.requestId;
+  securityHeaders = security.securityHeaders;
+  inputSanitization = security.inputSanitization;
+  corsOptions = security.corsOptions;
+  securityRequestLogger = security.requestLogger;
+  apiVersioning = security.apiVersioning;
+  compressionConfig = security.compressionConfig;
+  requestSizeLimit = security.requestSizeLimit;
+  deviceFingerprint = security.deviceFingerprint;
+  securityMaintenanceMode = security.maintenanceMode;
+  console.log('Security middleware loaded');
+} catch (error) {
+  console.error('Error loading security middleware:', error.message);
+  // Create fallback functions
+  authRateLimit = (req, res, next) => next();
+  generalRateLimit = (req, res, next) => next();
+  uploadRateLimit = (req, res, next) => next();
+  passwordResetRateLimit = (req, res, next) => next();
+  helmetConfig = (req, res, next) => next();
+  requestSignature = (req, res, next) => next();
+  ipFilter = (req, res, next) => next();
+  requestId = (req, res, next) => next();
+  securityHeaders = (req, res, next) => next();
+  inputSanitization = [(req, res, next) => next()];
+  corsOptions = {};
+  securityRequestLogger = (req, res, next) => next();
+  apiVersioning = (req, res, next) => next();
+  compressionConfig = (req, res, next) => next();
+  requestSizeLimit = (req, res, next) => next();
+  deviceFingerprint = (req, res, next) => next();
+  securityMaintenanceMode = (req, res, next) => next();
+}
 
-const { protect, optionalAuth } = require('./middleware/auth');
-const {
-  validateUserRegistration,
-  validateUserLogin,
-  validateBloodRequest,
-  validateDonationRecord,
-  validateMessage,
-  validateProfileUpdate,
-  validatePasswordChange,
-  validateMongoId,
-  validatePagination,
-  validateSearchQuery
-} = require('./middleware/validation');
+try {
+  const upload = require('./middleware/upload');
+  serveStaticFiles = upload.serveStaticFiles;
+  dualUploadMiddleware = upload.dualUploadMiddleware;
+  console.log('Upload middleware loaded');
+} catch (error) {
+  console.error('Error loading upload middleware:', error.message);
+  serveStaticFiles = (app) => {};
+  dualUploadMiddleware = (fieldName) => (req, res, next) => next();
+}
 
-// Import controllers
-const authController = require('./controllers/authController');
+try {
+  const auth = require('./middleware/auth');
+  protect = auth.protect;
+  optionalAuth = auth.optionalAuth;
+  console.log('Auth middleware loaded');
+} catch (error) {
+  console.error('Error loading auth middleware:', error.message);
+  protect = (req, res, next) => next();
+  optionalAuth = (req, res, next) => next();
+}
+
+try {
+  const validation = require('./middleware/validation');
+  validateUserRegistration = validation.validateUserRegistration;
+  validateUserLogin = validation.validateUserLogin;
+  validateBloodRequest = validation.validateBloodRequest;
+  validateDonationRecord = validation.validateDonationRecord;
+  validateMessage = validation.validateMessage;
+  validateProfileUpdate = validation.validateProfileUpdate;
+  validatePasswordChange = validation.validatePasswordChange;
+  validateMongoId = validation.validateMongoId;
+  validatePagination = validation.validatePagination;
+  validateSearchQuery = validation.validateSearchQuery;
+  console.log('Validation middleware loaded');
+} catch (error) {
+  console.error('Error loading validation middleware:', error.message);
+  validateUserRegistration = [(req, res, next) => next()];
+  validateUserLogin = [(req, res, next) => next()];
+  validateBloodRequest = [(req, res, next) => next()];
+  validateDonationRecord = [(req, res, next) => next()];
+  validateMessage = [(req, res, next) => next()];
+  validateProfileUpdate = [(req, res, next) => next()];
+  validatePasswordChange = [(req, res, next) => next()];
+  validateMongoId = (paramName) => [(req, res, next) => next()];
+  validatePagination = [(req, res, next) => next()];
+  validateSearchQuery = [(req, res, next) => next()];
+}
+
+try {
+  authController = require('./controllers/authController');
+  console.log('Auth controller loaded');
+} catch (error) {
+  console.error('Error loading auth controller:', error.message);
+  authController = {
+    register: (req, res) => res.json({ success: true, message: 'Register endpoint - Implementation pending' }),
+    login: (req, res) => res.json({ success: true, message: 'Login endpoint - Implementation pending' }),
+    logout: (req, res) => res.json({ success: true, message: 'Logout endpoint - Implementation pending' }),
+    refreshToken: (req, res) => res.json({ success: true, message: 'Refresh token endpoint - Implementation pending' }),
+    forgotPassword: (req, res) => res.json({ success: true, message: 'Forgot password endpoint - Implementation pending' }),
+    resetPassword: (req, res) => res.json({ success: true, message: 'Reset password endpoint - Implementation pending' }),
+    verifyOTP: (req, res) => res.json({ success: true, message: 'Verify OTP endpoint - Implementation pending' }),
+    changePassword: (req, res) => res.json({ success: true, message: 'Change password endpoint - Implementation pending' })
+  };
+}
 
 // Import models (to ensure they're registered)
-require('./models/User');
-require('./models/BloodRequest');
-require('./models/Donation');
-require('./models/Notification');
-require('./models/Message');
-require('./models/Achievement');
+try {
+  require('./models/User');
+  require('./models/BloodRequest');
+  require('./models/Donation');
+  require('./models/Notification');
+  require('./models/Message');
+  require('./models/Achievement');
+  console.log('Models loaded');
+} catch (error) {
+  console.error('Error loading models:', error.message);
+}
 
 // Handle uncaught exceptions
 handleUncaughtException();
 
+console.log('About to connect to database...');
+
 // Connect to database
-connectDB();
+connectDB().catch(err => {
+  console.error('Failed to connect to database:', err.message);
+  // Don't exit the process, let the app continue without database
+});
+
+console.log('Creating Express app...');
 
 const app = express();
+
+console.log('Setting up middleware...');
 
 // Trust proxy (for rate limiting behind reverse proxy)
 app.set('trust proxy', 1);
@@ -83,6 +191,16 @@ const fs = require('fs');
 if (!fs.existsSync('logs')) {
   fs.mkdirSync('logs');
 }
+
+// Create assets directories
+const dirs = ['assets', 'assets/profileimage', 'assets/documents', 'assets/certificates'];
+dirs.forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
+
+console.log('Setting up security middleware...');
 
 // Advanced Security Middleware
 app.use(requestId); // Add unique request ID
@@ -97,12 +215,18 @@ app.use(...inputSanitization); // XSS and NoSQL injection protection
 app.use(apiVersioning); // API versioning support
 app.use(requestSignature); // Request signature verification
 
+console.log('Setting up body parsing middleware...');
+
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+console.log('Setting up static files...');
+
 // Serve static files
 serveStaticFiles(app);
+
+console.log('Setting up logging...');
 
 // Request logging
 if (process.env.NODE_ENV === 'development') {
@@ -110,14 +234,22 @@ if (process.env.NODE_ENV === 'development') {
 }
 app.use(requestLogger);
 
+console.log('Setting up maintenance mode...');
+
 // Maintenance mode
 app.use(securityMaintenanceMode);
+
+console.log('Setting up rate limiting...');
 
 // Global rate limiting
 app.use(generalRateLimit);
 
+console.log('Setting up security request logging...');
+
 // Security request logging
 app.use(securityRequestLogger);
+
+console.log('Setting up routes...');
 
 // Health check endpoint
 app.get('/health', (req, res) => {

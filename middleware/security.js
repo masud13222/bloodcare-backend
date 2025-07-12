@@ -121,7 +121,7 @@ const ipFilter = (req, res, next) => {
 
 // Request ID middleware for tracing
 const requestId = (req, res, next) => {
-  const reqId = crypto.randomUUID();
+  const reqId = crypto.randomBytes(16).toString('hex');
   req.requestId = reqId;
   res.setHeader('X-Request-ID', reqId);
   next();
