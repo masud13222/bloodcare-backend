@@ -13,18 +13,15 @@ RUN npm ci --only=production
 # Copy application code
 COPY . .
 
-# Create logs directory
-RUN mkdir -p logs
-
-# Create assets directories
-RUN mkdir -p assets/profileimage assets/documents assets/certificates
-
-# Expose port
-EXPOSE 3000
+# Create necessary directories
+RUN mkdir -p logs assets/profileimage assets/documents assets/certificates
 
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=3000
+
+# Expose port
+EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

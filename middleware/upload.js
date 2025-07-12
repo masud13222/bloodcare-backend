@@ -5,12 +5,14 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const { AppError } = require('./errorHandler');
 
-// Configure Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
+// Configure Cloudinary (only if credentials are provided)
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+  });
+}
 
 // Create uploads directory if it doesn't exist
 const createUploadDirs = () => {
@@ -54,27 +56,30 @@ const localStorage = multer.diskStorage({
   }
 });
 
-// Cloudinary storage configuration
-const cloudinaryStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: (req, file) => {
-    let folder = 'bloodcare/misc';
-    
-    if (file.fieldname === 'avatar' || file.fieldname === 'profileImage') {
-      folder = 'bloodcare/profileimages';
-    } else if (file.fieldname === 'document') {
-      folder = 'bloodcare/documents';
-    } else if (file.fieldname === 'certificate') {
-      folder = 'bloodcare/certificates';
+// Cloudinary storage configuration (only if credentials are available)
+let cloudinaryStorage = null;
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  cloudinaryStorage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: (req, file) => {
+      let folder = 'bloodcare/misc';
+      
+      if (file.fieldname === 'avatar' || file.fieldname === 'profileImage') {
+        folder = 'bloodcare/profileimages';
+      } else if (file.fieldname === 'document') {
+        folder = 'bloodcare/documents';
+      } else if (file.fieldname === 'certificate') {
+        folder = 'bloodcare/certificates';
+      }
+      
+      return {
+        folder: folder,
+        allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx'],
+        public_id: `${file.fieldname}-${Date.now()}`,
+      };
     }
-    
-    return {
-      folder: folder,
-      allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx'],
-      public_id: `${file.fieldname}-${Date.now()}`,
-    };
-  }
-});
+  });
+}
 
 // File filter
 const fileFilter = (req, file, cb) => {
@@ -110,7 +115,7 @@ const getStorage = () => {
   
   switch (uploadStrategy) {
     case 'cloudinary':
-      return cloudinaryStorage;
+      return cloudinaryStorage || localStorage; // Fallback to local if cloudinary not configured
     case 'local':
     default:
       return localStorage;
@@ -230,6 +235,7 @@ const getFileUrl = (fileInfo) => {
 
 // Serve static files
 const serveStaticFiles = (app) => {
+  const express = require('express');
   app.use('/assets', express.static('assets'));
 };
 

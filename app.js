@@ -25,7 +25,6 @@ try {
   requestLogger = errorHandler.requestLogger;
   rateLimitHandler = errorHandler.rateLimitHandler;
   maintenanceMode = errorHandler.maintenanceMode;
-  console.log('Error handler middleware loaded');
 } catch (error) {
   console.error('Error loading error handler middleware:', error.message);
   // Create fallback functions
@@ -64,7 +63,6 @@ try {
   requestSizeLimit = security.requestSizeLimit;
   deviceFingerprint = security.deviceFingerprint;
   securityMaintenanceMode = security.maintenanceMode;
-  console.log('Security middleware loaded');
 } catch (error) {
   console.error('Error loading security middleware:', error.message);
   // Create fallback functions
@@ -91,7 +89,6 @@ try {
   const upload = require('./middleware/upload');
   serveStaticFiles = upload.serveStaticFiles;
   dualUploadMiddleware = upload.dualUploadMiddleware;
-  console.log('Upload middleware loaded');
 } catch (error) {
   console.error('Error loading upload middleware:', error.message);
   serveStaticFiles = (app) => {};
@@ -102,7 +99,6 @@ try {
   const auth = require('./middleware/auth');
   protect = auth.protect;
   optionalAuth = auth.optionalAuth;
-  console.log('Auth middleware loaded');
 } catch (error) {
   console.error('Error loading auth middleware:', error.message);
   protect = (req, res, next) => next();
@@ -121,7 +117,6 @@ try {
   validateMongoId = validation.validateMongoId;
   validatePagination = validation.validatePagination;
   validateSearchQuery = validation.validateSearchQuery;
-  console.log('Validation middleware loaded');
 } catch (error) {
   console.error('Error loading validation middleware:', error.message);
   validateUserRegistration = [(req, res, next) => next()];
@@ -138,7 +133,6 @@ try {
 
 try {
   authController = require('./controllers/authController');
-  console.log('Auth controller loaded');
 } catch (error) {
   console.error('Error loading auth controller:', error.message);
   authController = {
@@ -161,7 +155,6 @@ try {
   require('./models/Notification');
   require('./models/Message');
   require('./models/Achievement');
-  console.log('Models loaded');
 } catch (error) {
   console.error('Error loading models:', error.message);
 }
@@ -169,19 +162,13 @@ try {
 // Handle uncaught exceptions
 handleUncaughtException();
 
-console.log('About to connect to database...');
-
 // Connect to database
 connectDB().catch(err => {
   console.error('Failed to connect to database:', err.message);
   // Don't exit the process, let the app continue without database
 });
 
-console.log('Creating Express app...');
-
 const app = express();
-
-console.log('Setting up middleware...');
 
 // Trust proxy (for rate limiting behind reverse proxy)
 app.set('trust proxy', 1);
@@ -200,8 +187,6 @@ dirs.forEach(dir => {
   }
 });
 
-console.log('Setting up security middleware...');
-
 // Advanced Security Middleware
 app.use(requestId); // Add unique request ID
 app.use(ipFilter); // IP filtering and blacklist
@@ -215,18 +200,16 @@ app.use(...inputSanitization); // XSS and NoSQL injection protection
 app.use(apiVersioning); // API versioning support
 app.use(requestSignature); // Request signature verification
 
-console.log('Setting up body parsing middleware...');
-
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-console.log('Setting up static files...');
-
 // Serve static files
-serveStaticFiles(app);
-
-console.log('Setting up logging...');
+try {
+  serveStaticFiles(app);
+} catch (error) {
+  console.error('Error setting up static files:', error.message);
+}
 
 // Request logging
 if (process.env.NODE_ENV === 'development') {
@@ -234,22 +217,14 @@ if (process.env.NODE_ENV === 'development') {
 }
 app.use(requestLogger);
 
-console.log('Setting up maintenance mode...');
-
 // Maintenance mode
 app.use(securityMaintenanceMode);
-
-console.log('Setting up rate limiting...');
 
 // Global rate limiting
 app.use(generalRateLimit);
 
-console.log('Setting up security request logging...');
-
 // Security request logging
 app.use(securityRequestLogger);
-
-console.log('Setting up routes...');
 
 // Health check endpoint
 app.get('/health', (req, res) => {
