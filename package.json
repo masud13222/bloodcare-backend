@@ -32,10 +32,8 @@
     "socket.io": "^4.7.4",
     "moment": "^2.29.4",
     "geolib": "^3.3.4",
-    "crypto": "^1.0.1",
     "uuid": "^9.0.1",
     "winston": "^3.11.0",
-    "compression": "^1.7.4",
     "morgan": "^1.10.0"
   },
   "devDependencies": {
