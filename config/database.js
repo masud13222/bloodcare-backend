@@ -27,14 +27,19 @@ const connectDB = async () => {
 
     // Graceful shutdown
     process.on('SIGINT', async () => {
-      await mongoose.connection.close();
-      logger.info('MongoDB connection closed through app termination');
+      try {
+        await mongoose.connection.close();
+        logger.info('MongoDB connection closed through app termination');
+      } catch (error) {
+        logger.error('Error closing MongoDB connection:', error);
+      }
       process.exit(0);
     });
 
   } catch (error) {
     logger.error('MongoDB connection failed:', error);
-    process.exit(1);
+    // Don't exit the process, let the app continue without database
+    console.error('Warning: Database connection failed, continuing without database');
   }
 };
 

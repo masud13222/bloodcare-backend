@@ -10,16 +10,22 @@ const logger = winston.createLogger({
   ),
   defaultMeta: { service: 'bloodcare-api' },
   transports: [
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' })
+    new winston.transports.Console({
+      format: winston.format.simple()
+    })
   ]
 });
 
-// Add console transport in development
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.simple()
-  }));
+// Add file transports only if logs directory exists
+try {
+  const fs = require('fs');
+  if (fs.existsSync('logs')) {
+    logger.add(new winston.transports.File({ filename: 'logs/error.log', level: 'error' }));
+    logger.add(new winston.transports.File({ filename: 'logs/combined.log' }));
+  }
+} catch (error) {
+  // If file logging fails, just continue with console logging
+  console.warn('File logging disabled:', error.message);
 }
 
 // Custom error class

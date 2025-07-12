@@ -163,12 +163,17 @@ try {
 handleUncaughtException();
 
 // Connect to database
+console.log('About to connect to database...');
 connectDB().catch(err => {
   console.error('Failed to connect to database:', err.message);
   // Don't exit the process, let the app continue without database
 });
+console.log('Database connection initiated...');
 
+console.log('Creating Express app...');
 const app = express();
+
+console.log('Setting up middleware...');
 
 // Trust proxy (for rate limiting behind reverse proxy)
 app.set('trust proxy', 1);
@@ -188,6 +193,7 @@ dirs.forEach(dir => {
 });
 
 // Advanced Security Middleware
+console.log('Setting up security middleware...');
 app.use(requestId); // Add unique request ID
 app.use(ipFilter); // IP filtering and blacklist
 app.use(deviceFingerprint); // Device fingerprinting
@@ -201,10 +207,12 @@ app.use(apiVersioning); // API versioning support
 app.use(requestSignature); // Request signature verification
 
 // Body parsing middleware
+console.log('Setting up body parsing middleware...');
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files
+console.log('Setting up static files...');
 try {
   serveStaticFiles(app);
 } catch (error) {
@@ -613,10 +621,19 @@ app.all('*', handleNotFound);
 app.use(globalErrorHandler);
 
 const PORT = process.env.PORT || 3000;
+console.log(`Starting server on port ${PORT}...`);
 const server = app.listen(PORT, () => {
   console.log(`🚀 BloodCare API Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
+});
+
+// Handle server startup errors
+server.on('error', (error) => {
+  console.error('Server startup error:', error);
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use`);
+  }
 });
 
 // Handle unhandled promise rejections
